@@ -1,0 +1,22 @@
+# Bilingual-pair consistency record for 2026-09-27-collapsible-question-composer-content.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-27-collapsible-question-composer-content.md
+/agent-note-collapsible-question-composer-content:
+  en: 595d7d9831a9a60a
+  zh: d001e6e637412043
+/agent-note-collapsible-question-composer-content/problem:
+  en: 129eddacddd7b818
+  zh: ba375afecf31936f
+/agent-note-collapsible-question-composer-content/decision:
+  en: 1981ec105ab664d1
+  zh: f1fda8ba1863c581
+/agent-note-collapsible-question-composer-content/verification:
+  en: 4343e1b4c1109cdb
+  zh: 4630a5f90425d1f7
+/agent-note-collapsible-question-composer-content/alternatives-considered:
+  en: 8d93b8529c6eebf6
+  zh: b739725e572dcbf7
+/agent-note-collapsible-question-composer-content/consequences:
+  en: b1c91caf06f644f0
+  zh: 48350bea832bdac3

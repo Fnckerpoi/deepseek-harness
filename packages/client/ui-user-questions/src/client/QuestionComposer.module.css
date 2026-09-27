@@ -53,28 +53,52 @@
   padding-bottom: 14px;
 }
 
-/* Header button group: minimize sits next to the close action, both on the
-   same 24px icon-button grid. */
+/* Header keeps the title disclosure below its bounded heading while the card
+   controls stay pinned beside it. */
 .headerActions {
+  grid-area: actions;
   display: flex;
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
 }
 
-/* Figma 1019:36938 header, user-tuned: heading block left, close right; the
-   pager sits in the footer to balance the card. */
 .header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
+  display: grid;
+  grid-template: 'heading actions' auto 'toggle actions' auto / minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 16px;
   flex-shrink: 0;
   padding: 20px 16px 0 24px;
 }
 
+.headerShort {
+  grid-template: 'heading actions' auto / minmax(0, 1fr) auto;
+}
+
 .headingBlock {
+  grid-area: heading;
   min-width: 0;
+  max-height: min(10vh, 52px);
+  overflow: hidden;
+}
+
+.headingBlockExpanded {
+  max-height: min(60vh, 360px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.headingToggle {
+  grid-area: toggle;
+  justify-self: start;
+  margin-top: 2px;
+}
+
+.headingDisclosureSpacer {
+  grid-area: toggle;
+  min-height: 32px;
+  pointer-events: none;
 }
 
 .eyebrow {
@@ -90,10 +114,23 @@
   font-size: 16px;
   line-height: 22px;
   font-weight: 500;
+  overflow-wrap: anywhere;
 }
 
 .detail {
+  max-height: min(12vh, 72px);
   margin: 0 2px 8px;
+  overflow: hidden;
+}
+
+.detailExpanded {
+  max-height: min(48vh, 320px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.detailToggle {
+  margin: 0 2px 4px;
 }
 
 .footerActions {
@@ -150,16 +187,19 @@
   flex: 1 1 auto;
   flex-direction: column;
   min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  overflow: hidden;
 }
 
 .options {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 1px;
+  min-height: 0;
   margin: 8px 0 0;
   padding: 4px 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .option {

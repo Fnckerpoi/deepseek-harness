@@ -2,7 +2,7 @@
 import type { GlobalStandardProps } from '@deepseek-ai/dsh-client-ui-slots'
 import { useSyncExternalStore } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { PendingQuestion, type QuestionComposerProps } from '../src/client/contract/slots.ts'
 import { createQuestionDraftStore } from '../src/client/draft-store.ts'
@@ -188,10 +188,13 @@ describe('QuestionComposer', () => {
     expect(screen.getByText('推荐')).toBeTruthy()
     expect(screen.getByText('工程落地型')).toBeTruthy()
     const detail = screen.getByText('按当前空缺岗位的优先级选择。')
-    const scrollRegion = detail.closest('[data-question-scroll]')
-    expect(scrollRegion).toBeTruthy()
-    expect(scrollRegion?.contains(screen.getByRole('radio', { name: /工程落地型/ }))).toBe(true)
-    expect(scrollRegion?.contains(screen.getByText('下一题').closest('button'))).toBe(false)
+    const detailRegion = detail.closest('[data-question-detail-scroll]')
+    const optionRegion = screen.getByRole('radio', { name: /工程落地型/ }).closest('[data-question-scroll]')
+    expect(detailRegion).toBeTruthy()
+    expect(optionRegion).toBeTruthy()
+    expect(optionRegion?.contains(screen.getByRole('radio', { name: /工程落地型/ }))).toBe(true)
+    expect(optionRegion?.contains(screen.getByText('下一题').closest('button'))).toBe(false)
+    expect(detailRegion?.contains(optionRegion)).toBe(false)
     fireEvent.keyDown(screen.getByRole('radio', { name: /工程落地型/ }), { key: 'Enter' })
     expect(answer).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('radio', { name: /工程落地型/ }))
@@ -226,6 +229,66 @@ describe('QuestionComposer', () => {
       { id: 'signals', selected: ['系统设计', '代码质量', '产品判断'], custom: '沟通能力' },
     ]))
     expect(screen.getByRole<HTMLButtonElement>('button', { name: '正在提交…' }).disabled).toBe(true)
+  })
+
+  it('keeps long question and detail text readable while preserving the option and submission controls', async () => {
+    try {
+      vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(100)
+      vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function (this: HTMLElement) {
+        return this.hasAttribute('data-question-title-scroll') || this.hasAttribute('data-question-detail-scroll')
+          ? 1000
+          : 100
+      })
+      class ResizeObserverStub {
+        constructor(private readonly callback: ResizeObserverCallback) {}
+        observe(target: Element): void {
+          const size = { inlineSize: 0, blockSize: 0 }
+          this.callback([{
+            target,
+            contentRect: new DOMRectReadOnly(),
+            borderBoxSize: [size],
+            contentBoxSize: [size],
+            devicePixelContentBoxSize: [size],
+          }], this)
+        }
+        disconnect(): void {}
+        unobserve(): void {}
+      }
+      vi.stubGlobal('ResizeObserver', ResizeObserverStub)
+      const questionText = '请检查这条很长的问题说明并选择合适方案。'.repeat(120)
+      const detailText = '实施背景、约束条件与补充信息应保持完整可读。'.repeat(120)
+      const { carrier, answer } = wait([{
+        id: 'long-question',
+        question: questionText,
+        detail: detailText,
+        options: [{ label: '继续' }, { label: '取消' }],
+      }])
+      render(<QuestionComposer matched={carrier} {...kit} />)
+
+      expect(screen.getByRole('heading', { name: questionText })).toBeTruthy()
+      expect(screen.getByText(detailText)).toBeTruthy()
+      const expandQuestion = await screen.findByRole('button', { name: '展开完整问题' })
+      fireEvent.click(expandQuestion)
+      await waitFor(() => { expect(screen.getByRole('button', { name: '收起问题' }).getAttribute('aria-expanded')).toBe('true') })
+      expect(screen.getByRole('button', { name: '展开完整说明' })).toBeTruthy()
+      const collapseQuestion = screen.getByRole('button', { name: '收起问题' })
+      fireEvent.click(collapseQuestion)
+      await waitFor(() => { expect(screen.getByRole('button', { name: '展开完整问题' }).getAttribute('aria-expanded')).toBe('false') })
+      const expandDetail = await screen.findByRole('button', { name: '展开完整说明' })
+      fireEvent.click(expandDetail)
+      await waitFor(() => { expect(screen.getByRole('button', { name: '收起说明' }).getAttribute('aria-expanded')).toBe('true') })
+      expect(screen.getByRole('button', { name: '展开完整问题' })).toBeTruthy()
+      expect(screen.getByRole('radio', { name: '继续' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: '提交' })).toBeTruthy()
+      expect(screen.getByRole('radiogroup').contains(screen.getByRole('radio', { name: '继续' }))).toBe(true)
+      fireEvent.click(screen.getByRole('radio', { name: '继续' }))
+      fireEvent.click(screen.getByRole('button', { name: '提交' }))
+      expect(answer).toHaveBeenCalledWith(answerBatch([{ id: 'long-question', selected: ['继续'] }]))
+    } finally {
+      cleanup()
+      vi.restoreAllMocks()
+      vi.unstubAllGlobals()
+    }
   })
 
   it('renders plan detail through the shared assistant Markdown primitive', () => {

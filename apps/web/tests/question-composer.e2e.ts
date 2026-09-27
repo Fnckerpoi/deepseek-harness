@@ -13,8 +13,7 @@ import { join } from 'node:path'
 import type { Browser, Locator, Page } from 'playwright'
 import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { SessionId, SessionEvent } from '@deepseek-ai/dsh-session'
 import {
   assertFixtureInventory, captureStableAria, compareOrRefreshGolden, fixtureUserPrompts,
   launchWebScaffold, recordFixture, seedSession, watchConsole, webSnapshotMode, type WebScaffold,
@@ -188,28 +187,26 @@ describe('web e2e: resident question composer round trip', () => {
         const squeeze = await composer.evaluate((card) => {
           // Role/ARIA selectors, not the CSS-module class names: the built
           // client hashes those.
-          const rows = [...card.querySelectorAll<HTMLElement>(
-            '[role="radio"], [role="checkbox"], [aria-expanded]',
-          )]
+          const rows = [...card.querySelectorAll<HTMLElement>('[role="radio"], [role="checkbox"]')]
           const spill = rows.map(row => Math.max(...[...row.children].map((child) => {
             const box = row.getBoundingClientRect()
             const inner = child.getBoundingClientRect()
             return Math.max(box.top - inner.top, inner.bottom - box.bottom)
           })))
           const list = card.querySelector<HTMLElement>('[data-question-scroll]')
+          const footer = card.querySelector<HTMLElement>('footer')
           return {
             rows: rows.length,
             spill: Math.max(...spill),
-            // Wrapped option text is what overflows a collapsed row, and a
-            // scrolling list proves the seat is genuinely capped. Without both,
-            // the spill assertion would hold vacuously.
             wrappedRows: rows.filter(row => row.getBoundingClientRect().height > 42).length,
             scrolls: list === null ? false : list.scrollHeight > list.clientHeight,
+            footerVisible: footer !== null && footer.getBoundingClientRect().bottom <= card.getBoundingClientRect().bottom,
           }
         })
         expect(squeeze.rows).toBeGreaterThan(0)
         expect(squeeze.wrappedRows).toBeGreaterThan(0)
         expect(squeeze.scrolls).toBe(true)
+        expect(squeeze.footerVisible).toBe(true)
         // Sub-pixel tolerance: every row's copy stays inside its border box.
         expect(squeeze.spill).toBeLessThan(0.6)
       }
@@ -314,11 +311,65 @@ describe('web e2e: resident question composer round trip', () => {
     expect(tripwire.warnings).toEqual([])
   }, 200_000)
 
-  // The fixture's question carries options, so the round trip above only ever
-  // exercises the inline shape. The optionless shape is the one that carries
-  // padding, which is where a cap measured in box pixels drifts off the line
-  // count — so it is asked straight through the user-questions seam (the same
-  // service the tool calls; no model round is involved in a layout metric).
+  it.skipIf(MODE === 'record')('keeps a long question and detail expandable beside reachable choices and actions', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-question-long-content'))
+    const sessionId = answeredSession
+    expect(sessionId).toBeDefined()
+    const agent = scaffold.ctx.agents.get(sessionId as SessionId)
+    expect(agent).toBeDefined()
+    await page.setViewportSize({ width: 900, height: 520 })
+    const questionText = `Choose a delivery mode. ${'Review the full scenario, constraints, and rollback conditions before selecting an option. '.repeat(50)}`
+    const detailText = `Implementation context. ${'These notes provide the relevant background, boundaries, and operational considerations. '.repeat(50)}`
+    const options = Array.from({ length: 8 }, (_, index) => ({
+      label: `Mode ${String(index + 1)}`,
+      description: 'A concrete delivery option with validation and rollback coverage.',
+    }))
+    const asked = scaffold.ctx.userQuestions.ask({
+      agent: agent as NonNullable<typeof agent>,
+      questions: [{ id: 'long-layout', question: questionText, detail: detailText, options, multiSelect: true }],
+    })
+    const composer = page.locator('[data-question-key]')
+    await composer.waitFor({ timeout: 30_000 })
+
+    const questionDisclosure = composer.getByRole('button', { name: 'Expand full question' })
+    await questionDisclosure.waitFor({ state: 'visible' })
+    await questionDisclosure.click()
+    expect(await composer.locator('[data-question-title-scroll]').evaluate((element) => {
+      const scroll = element as HTMLElement
+      scroll.scrollTop = scroll.scrollHeight
+      return scroll.scrollTop + scroll.clientHeight >= scroll.scrollHeight
+    })).toBe(true)
+
+    await composer.getByRole('button', { name: 'Collapse question' }).click()
+    const detailDisclosure = composer.getByRole('button', { name: 'Expand full details' })
+    await detailDisclosure.waitFor({ state: 'visible' })
+    await detailDisclosure.click()
+    expect(await composer.locator('[data-question-detail-scroll]').evaluate((element) => {
+      const scroll = element as HTMLElement
+      scroll.scrollTop = scroll.scrollHeight
+      return scroll.scrollTop + scroll.clientHeight >= scroll.scrollHeight
+    })).toBe(true)
+
+    const choiceRegion = composer.locator('[data-question-scroll]')
+    expect(await choiceRegion.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true)
+    expect(await choiceRegion.getByRole('checkbox', { name: 'Mode 1' }).count()).toBe(1)
+    expect(await composer.getByRole('button', { name: 'Skip' }).isVisible()).toBe(true)
+    expect(await composer.getByRole('button', { name: 'Submit' }).isVisible()).toBe(true)
+    const footerFits = await composer.locator('footer').evaluate((footer) => {
+      const card = footer.closest('section')
+      return card !== null && footer.getBoundingClientRect().bottom <= card.getBoundingClientRect().bottom
+    })
+    expect(footerFits).toBe(true)
+
+    await choiceRegion.getByRole('checkbox', { name: 'Mode 1' }).click()
+    await composer.getByRole('button', { name: 'Submit' }).click()
+    expect(await asked).toEqual({ answers: [{ id: 'long-layout', selected: ['Mode 1'] }] })
+    await expect.poll(() => page.locator('[data-question-key]').count()).toBe(0)
+    await page.setViewportSize({ width: 1680, height: 1000 })
+  }, 60_000)
+
+  // The optionless shape carries extra padding, so it is asked directly through
+  // the same user-questions service the tool calls (no model round involved).
   it.skipIf(MODE === 'record')('grows the optionless answer to the same cap', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-question-optionless'))
     const sessionId = answeredSession

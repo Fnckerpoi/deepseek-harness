@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react'
 import clsx from 'clsx'
 import {
   Button, IconCheckOutlineRegular, IconChevronDownOutlineRegular, IconChevronLeftOutlineRegular,
@@ -149,6 +149,12 @@ function QuestionFlow({ pending, t, useStore, actions }: QuestionFlowProps) {
   // Collapsed to the header strip so the conversation above stays readable
   // while the user decides; answer drafts live in the Session store above.
   const [minimized, setMinimized] = useState(false)
+  const [expandedQuestionKey, setExpandedQuestionKey] = useState<string | null>(null)
+  const [questionOverflow, setQuestionOverflow] = useState(false)
+  const [expandedDetailKey, setExpandedDetailKey] = useState<string | null>(null)
+  const [detailOverflow, setDetailOverflow] = useState(false)
+  const headingBlockRef = useRef<HTMLDivElement>(null)
+  const detailRef = useRef<HTMLDivElement>(null)
   // The free-form textarea autofocuses on first presentation; re-expanding a
   // collapsed question must not steal focus from the expand toggle back into
   // the input, so focus is granted once per question index.
@@ -159,6 +165,36 @@ function QuestionFlow({ pending, t, useStore, actions }: QuestionFlowProps) {
   // oxlint-disable-next-line typescript/no-non-null-assertion
   const draft = drafts[index]!
   const hasOptions = (question.options?.length ?? 0) > 0
+  const expandedQuestion = expandedQuestionKey === question.id
+  const expandedDetail = expandedDetailKey === question.id
+  const showQuestionDisclosure = questionOverflow || question.question.length > 120 || expandedQuestion
+  const showDetailDisclosure = question.detail !== undefined && (detailOverflow || question.detail.length > 180 || expandedDetail)
+
+  useLayoutEffect(() => {
+    if (minimized) return
+    const heading = headingBlockRef.current
+    if (heading === null) return
+    const measure = (): void => { setQuestionOverflow(heading.scrollHeight > heading.clientHeight) }
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measure)
+    observer.observe(heading)
+    const title = heading.querySelector('h2')
+    if (title !== null) observer.observe(title)
+    return () => { observer.disconnect() }
+  }, [expandedQuestion, index, question.header, question.question, minimized])
+
+  useLayoutEffect(() => {
+    if (minimized) return
+    const detail = detailRef.current
+    if (detail === null) return
+    const measure = (): void => { setDetailOverflow(detail.scrollHeight > detail.clientHeight) }
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measure)
+    observer.observe(detail)
+    return () => { observer.disconnect() }
+  }, [expandedDetail, index, question.detail, minimized])
 
   const replaceProgress = (nextIndex: number, nextDrafts: QuestionDraftAnswer[]): void => {
     actions.replace(pending.key, { index: nextIndex, drafts: nextDrafts })
@@ -280,10 +316,17 @@ function QuestionFlow({ pending, t, useStore, actions }: QuestionFlowProps) {
         className={clsx(css.card, minimized && css.cardMinimized)}
         aria-labelledby={`question-${pending.key}-${String(index)}`}
       >
-        <header className={css.header}>
-          <div className={css.headingBlock}>
+        <header className={clsx(css.header, !minimized && !showQuestionDisclosure && !showDetailDisclosure && css.headerShort)}>
+          <div
+            ref={headingBlockRef}
+            className={clsx(css.headingBlock, expandedQuestion && css.headingBlockExpanded)}
+            data-question-title-scroll
+          >
             {question.header !== undefined && <div className={css.eyebrow}>{question.header}</div>}
-            <h2 className={css.title} id={`question-${pending.key}-${String(index)}`}>
+            <h2
+              className={css.title}
+              id={`question-${pending.key}-${String(index)}`}
+            >
               {question.question}
             </h2>
           </div>
@@ -306,15 +349,54 @@ function QuestionFlow({ pending, t, useStore, actions }: QuestionFlowProps) {
               <IconCloseOutlineRegular />
             </button>
           </div>
+          {!minimized && showQuestionDisclosure ? (
+            <div className={css.headingToggle}>
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-expanded={expandedQuestion}
+                onClick={() => {
+                  setExpandedQuestionKey(expandedQuestion ? null : question.id)
+                  if (!expandedQuestion) setExpandedDetailKey(null)
+                }}
+              >
+                {t(expandedQuestion ? 'nav.collapseQuestion' : 'nav.expandQuestion')}
+              </Button>
+            </div>
+          ) : !minimized && showDetailDisclosure ? (
+            <div className={css.headingDisclosureSpacer} aria-hidden="true" />
+          ) : null}
         </header>
 
         {!minimized && (
           <>
-            <div className={css.body} data-question-scroll>
+            <div className={css.body}>
               {question.detail !== undefined && (
-                <div className={css.detail}><MarkdownText text={question.detail} labels={markdownLabels} /></div>
+                <>
+                  <div
+                    ref={detailRef}
+                    className={clsx(css.detail, expandedDetail && css.detailExpanded)}
+                    data-question-detail-scroll
+                  >
+                    <MarkdownText text={question.detail} labels={markdownLabels} />
+                  </div>
+                  {showDetailDisclosure && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className={css.detailToggle}
+                      aria-expanded={expandedDetail}
+                      onClick={() => {
+                        setExpandedDetailKey(expandedDetail ? null : question.id)
+                        if (!expandedDetail) setExpandedQuestionKey(null)
+                      }}
+                    >
+                      {t(expandedDetail ? 'nav.collapseDetail' : 'nav.expandDetail')}
+                    </Button>
+                  )}
+                </>
               )}
-              <div className={css.options} role={question.multiSelect === true ? 'group' : 'radiogroup'}>
+              <div className={css.options} data-question-scroll role={question.multiSelect === true ? 'group' : 'radiogroup'}>
                 {(question.options ?? []).map((option, optionIndex) => {
                   const selected = draft.selected.includes(option.label)
                   const display = parseRecommendedLabel(option.label)
